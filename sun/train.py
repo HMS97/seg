@@ -42,7 +42,10 @@ path = '/home/shiyi/beshe/seg_competition/dataset'
 
 
 model_names = ['unet' ]
-
+try:
+    os.mkdir(f'./model/')
+except:
+    pass
 num_classes = 16
 history = collections.defaultdict(list)
 learning_rate = 5e-3
