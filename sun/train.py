@@ -2,14 +2,11 @@
 # coding: utf-8
 
 # In[28]:
-
-
 from PIL import Image
 import cv2
 from path import Path
 import collections
 import torch
-import torch.backends.cudnn
 from torch.optim import Adam
 from torch.utils.data import DataLoader
 from torchvision import transforms
@@ -27,41 +24,25 @@ from utils.transforms import (
     ImageToTensor,
     MaskToTensor,
 )
+from torchcontrib.optim import SWA
+import torchcontrib
 from torchvision.transforms import Resize, CenterCrop, Normalize
 from utils.metrics import Metrics
 from models.segnet.segnet import segnet
-from models.unet.unet import UNet
+from models.unet.Unet import UNet
 import datetime
 import random
 import os
 import tqdm
 import json
+import argparse
+
 device = 'cuda'
-path = '/home/shiyi/beshe/seg_competition/dataset'
+path = './dataset'
 
 
-
-model_names = ['unet' ]
-try:
-    os.mkdir(f'./model/')
-except:
-    pass
-num_classes = 16
-history = collections.defaultdict(list)
-learning_rate = 5e-3
-num_epochs = 50
-model_dict = {
-            'unet':UNet( num_classes = num_classes ).train().to(device),
-             'segnet':segnet(  n_classes = num_classes ).train().to(device),
-             'pspnet':smp.PSPNet(classes= num_classes ).train().to(device),
-             }
-
-    #net = torch.load('model/0514pspnet.pth')
-
-    
-def get_dataset_loaders( workers):
+def get_dataset_loaders( workers,    batch_size = 4  ):
     target_size = 512
-    batch_size = 4  
 
     mean, std = [0.485, 0.456, 0.406], [0.229, 0.224, 0.225]
 
@@ -173,17 +154,55 @@ def validate(loader, num_classes, device, net, criterion):
 
 
 
-for model_item in model_names:
-    net = model_dict[model_item]
-    optimizer = torch.optim.SGD(net.parameters(), lr=learning_rate)
-    criterion = FocalLoss2d().to(device)
 
-    train_loader, val_loader = get_dataset_loaders( 5)
+
+
+if __name__ == '__main__':
+
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--n_epoch', nargs='?', type=int, default=50, 
+                    help='# of the epochs')
+    parser.add_argument('--batch_size', nargs='?', type=int, default=16, 
+                    help='Batch Size')
+    parser.add_argument('--l_rate', nargs='?', type=float, default=5e-3, 
+                    help='Learning Rate')
+    parser.add_argument('--model',nargs='?',type=str,default='unet')
+
+    arg = parser.parse_args()
+
+
+  
+
+
+    num_classes = 16
+    model_name = arg.model
+    learning_rate = arg.l_rate
+    num_epochs = arg.n_epoch
+    batch_size = arg.batch_size
+
+
+    history = collections.defaultdict(list)
+    model_dict = {
+                'unet':UNet( num_classes = num_classes ).train().to(device),
+                'segnet':segnet(  n_classes = num_classes ).train().to(device),
+                'pspnet':smp.PSPNet(classes= num_classes ).train().to(device),
+                }
+
+    net = model_dict[model_name]
+
+    if torch.cuda.device_count() > 1:
+        print("using multi gpu")
+        net = torch.nn.DataParallel(net,device_ids = [0, 1, 2, 3])
+        
+    criterion = FocalLoss2d().to(device)
+    base_opt = torch.optim.SGD(net.parameters(), lr=learning_rate)
+    opt = torchcontrib.optim.SWA(base_opt, swa_start=10, swa_freq=5, swa_lr=0.05)
+    train_loader, val_loader = get_dataset_loaders(5,batch_size)
 
     for epoch in range(num_epochs):
         print("Epoch: {}/{}".format(epoch + 1, num_epochs))
 
-        train_hist = train(train_loader, num_classes, device, net, optimizer, criterion)
+        train_hist = train(train_loader, num_classes, device, net, opt, criterion)
         print( 'loss',train_hist["loss"],
                 'miou',train_hist["miou"],
                 'fg_iou',train_hist["fg_iou"],
@@ -205,10 +224,8 @@ for model_item in model_names:
 
         checkpoint = f'model/{model_item}_{today}.pth'
         torch.save(net,checkpoint)
-
+    opt.swap_swa_sgd()
     json = json.dumps(history)
     f = open(f"model/{model_item}_{today}.json","w")
     f.write(json)
     f.close()
-
-

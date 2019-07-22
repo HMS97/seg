@@ -15,10 +15,6 @@ import random
 import shutil
 
 
-# In[2]:
-
-
-
     
 def crop_by_sequence(image_path,img_class_path,crop_size_w,crop_size_h,prefix,save_dir ,same_scale = False):
     """
@@ -30,7 +26,7 @@ def crop_by_sequence(image_path,img_class_path,crop_size_w,crop_size_h,prefix,sa
     prefix: the special word you want to add
     same_scale: big or small to same
     """
-    raw_img = io.imread(image_path,)
+    raw_img = io.imread(image_path,)[:,:,1:]
     raw_img_class = io.imread(img_class_path,)
     
     
@@ -107,7 +103,7 @@ def crop_by_random(num,image_path,img_class_path,crop_size_w,crop_size_h,prefix,
         crop_size_w = crop_size_w * 2 
         crop_size_h = crop_size_h * 2
 
-    raw_img = io.imread(image_path,)
+    raw_img = io.imread(image_path,)[:,:,1:]
     raw_img_class = io.imread(img_class_path)
     print(raw_img.shape, raw_img_class.shape)
     h,w,c = raw_img.shape[0],raw_img.shape[1],raw_img.shape[2]

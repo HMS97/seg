@@ -74,7 +74,7 @@ class SlippyMapTilesConcatenation(torch.utils.data.Dataset):
     def __getitem__(self, i):
         # at this point all transformations are applied and we expect to work with raw tensors
 
-        images = io.imread(self.inputs[i])[:,:,1:]
+        images = io.imread(self.inputs[i])
         images = Image.fromarray(images)
         if self.test == False:
             mask  = Image.open(self.target[i])
