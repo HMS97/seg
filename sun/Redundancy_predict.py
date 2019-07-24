@@ -27,6 +27,8 @@ import tifffile as tiff
 from PIL import Image
 from skimage import io
 import matplotlib.image as mpimg
+from utils.en_de import Encode_Decode
+
 # import libtiff
 
 # need to create a file to store temp pictures
@@ -134,58 +136,6 @@ def get_dataset_loaders( workers):
     return test_loader
 
 
-def get_labels():
-    """Load the mapping that associates classes with label colors
-
-    Returns:
-        np.ndarray with dimensions (13, 3)
-    """
-    return np.array([
-        [  0,   0,   0],
-        [0, 200 ,0],
-       [150, 250,   0],
-       [150, 200, 150],
-       [200,   0, 200],
-       [150,   0, 250],
-       [150, 150, 250],
-       [250, 200,   0],
-       [200, 200,   0],
-       [200,   0,   0],
-       [250,   0, 150],
-       [200, 150, 150],
-       [250, 150, 150],
-       [  0,   0, 200],
-       [  0, 150, 200],
-       [  0, 200, 250]])
-
-
-def decode_segmap(label_mask, n_classes):
-    """Decode segmentation class labels into a color image
-
-    Args:
-        label_mask (np.ndarray): an (M,N) array of integer values denoting
-          the class label at each spatial location.
-        plot (bool, optional): whether to show the resulting color image
-          in a figure.
-
-    Returns:
-        (np.ndarray, optional): the resulting decoded color image.
-    """
-    label_colours = get_labels()
-    r = label_mask.copy()
-    g = label_mask.copy()
-    b = label_mask.copy()
-    for ll in range(0, n_classes):
-        r[label_mask == ll] = label_colours[ll, 0]
-        g[label_mask == ll] = label_colours[ll, 1]
-        b[label_mask == ll] = label_colours[ll, 2]
-    rgb = np.zeros((label_mask.shape[0], label_mask.shape[1], 3))
-    rgb[:, :, 0] = r
-    rgb[:, :, 1] = g
-    rgb[:, :, 2] = b
-    return rgb.astype(np.uint8)
-
-
 if __name__ =="__main__":
     parse = argparse.ArgumentParser()
     parse.add_argument("--n_class", type=int, default=16, help="the number of classes")
@@ -199,6 +149,7 @@ if __name__ =="__main__":
 
     # predict on one model
     model = torch.load("./model/unet_2019-07-24_swa.pth")
+    en_de_tool = Encode_Decode()
 
     imgList = glob.glob("./test/*(2).tif")
     num = len(imgList)
@@ -222,6 +173,6 @@ if __name__ =="__main__":
             shutil.rmtree('temp_pic')
         except:
             pass
-        decoded = decode_segmap(mask_result, args.n_class)[:, :, ::-1]
+        decoded = en_de_tool.decode_segmap(mask_result)[:, :, ::-1]
         # print(mask_result.shape)
         cv2.imwrite(f'{save_path}/{name}_label.tif', decoded)
