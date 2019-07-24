@@ -44,7 +44,7 @@ path = './temp_pic/'
 
 device = 'cuda'
 # predict on one model
-model = torch.load(f'model/unet_2019-07-21.pth')
+model = torch.load('model/unet_2019-07-21.pth')
 # give the picture you want to predict
 
 

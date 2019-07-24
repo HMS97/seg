@@ -1,118 +1,141 @@
+"""U-Net inspired encoder-decoder architecture with a ResNet encoder as proposed by Alexander Buslaev.
 
-import torch.nn.functional as F
+See:
+- https://arxiv.org/abs/1505.04597 - U-Net: Convolutional Networks for Biomedical Image Segmentation
+- https://arxiv.org/abs/1411.4038  - Fully Convolutional Networks for Semantic Segmentation
+- https://arxiv.org/abs/1512.03385 - Deep Residual Learning for Image Recognition
+- https://arxiv.org/abs/1801.05746 - TernausNet: U-Net with VGG11 Encoder Pre-Trained on ImageNet for Image Segmentation
+- https://arxiv.org/abs/1806.00844 - TernausNetV2: Fully Convolutional Network for Instance Segmentation
 
+"""
 
 import torch
 import torch.nn as nn
-import torch.nn.functional as F
+
+from torchvision.models import resnet50
 
 
-class double_conv(nn.Module):
-    '''(conv => BN => ReLU) * 2'''
-    def __init__(self, in_ch, out_ch):
-        super(double_conv, self).__init__()
-        self.conv = nn.Sequential(
-            nn.Conv2d(in_ch, out_ch, 3, padding=1),
-            nn.BatchNorm2d(out_ch),
-            nn.ReLU(inplace=True),
-            nn.Conv2d(out_ch, out_ch, 3, padding=1),
-            nn.BatchNorm2d(out_ch),
-            nn.ReLU(inplace=True)
-        )
+class ConvRelu(nn.Module):
+    """3x3 convolution followed by ReLU activation building block.
+    """
 
-    def forward(self, x):
-        x = self.conv(x)
-        return x
+    def __init__(self, num_in, num_out):
+        """Creates a `ConvReLU` building block.
 
+        Args:
+          num_in: number of input feature maps
+          num_out: number of output feature maps
+        """
 
-class inconv(nn.Module):
-    def __init__(self, in_ch, out_ch):
-        super(inconv, self).__init__()
-        self.conv = double_conv(in_ch, out_ch)
+        super().__init__()
+
+        self.block = nn.Conv2d(num_in, num_out, kernel_size=3, padding=1, bias=False)
 
     def forward(self, x):
-        x = self.conv(x)
-        return x
+        """The networks forward pass for which autograd synthesizes the backwards pass.
+
+        Args:
+          x: the input tensor
+
+        Returns:
+          The networks output tensor.
+        """
+
+        return nn.functional.relu(self.block(x), inplace=True)
 
 
-class down(nn.Module):
-    def __init__(self, in_ch, out_ch):
-        super(down, self).__init__()
-        self.mpconv = nn.Sequential(
-            nn.MaxPool2d(2),
-            double_conv(in_ch, out_ch)
-        )
+class DecoderBlock(nn.Module):
+    """Decoder building block upsampling resolution by a factor of two.
+    """
 
-    def forward(self, x):
-        x = self.mpconv(x)
-        return x
+    def __init__(self, num_in, num_out):
+        """Creates a `DecoderBlock` building block.
 
+        Args:
+          num_in: number of input feature maps
+          num_out: number of output feature maps
+        """
 
-class up(nn.Module):
-    def __init__(self, in_ch, out_ch, bilinear=True):
-        super(up, self).__init__()
+        super().__init__()
 
-        #  would be a nice idea if the upsampling could be learned too,
-        #  but my machine do not have enough memory to handle all those weights
-        if bilinear:
-            self.up = nn.Upsample(scale_factor=2, mode='bilinear', align_corners=True)
-        else:
-            self.up = nn.ConvTranspose2d(in_ch//2, in_ch//2, 2, stride=2)
-
-        self.conv = double_conv(in_ch, out_ch)
-
-    def forward(self, x1, x2):
-        x1 = self.up(x1)
-        
-        # input is CHW
-        diffY = x2.size()[2] - x1.size()[2]
-        diffX = x2.size()[3] - x1.size()[3]
-
-        x1 = F.pad(x1, (diffX // 2, diffX - diffX//2,
-                        diffY // 2, diffY - diffY//2))
-        
-        # for padding issues, see 
-        # https://github.com/HaiyongJiang/U-Net-Pytorch-Unstructured-Buggy/commit/0e854509c2cea854e247a9c615f175f76fbb2e3a
-        # https://github.com/xiaopeng-liao/Pytorch-UNet/commit/8ebac70e633bac59fc22bb5195e513d5832fb3bd
-
-        x = torch.cat([x2, x1], dim=1)
-        x = self.conv(x)
-        return x
-
-
-class outconv(nn.Module):
-    def __init__(self, in_ch, out_ch):
-        super(outconv, self).__init__()
-        self.conv = nn.Conv2d(in_ch, out_ch, 1)
+        self.block = ConvRelu(num_in, num_out)
 
     def forward(self, x):
-        x = self.conv(x)
-        return x
-        
-        
+        """The networks forward pass for which autograd synthesizes the backwards pass.
+
+        Args:
+          x: the input tensor
+
+        Returns:
+          The networks output tensor.
+        """
+
+        return self.block(nn.functional.upsample(x, scale_factor=2, mode="nearest"))
+
+
 class UNet(nn.Module):
-    def __init__(self, n_channels, n_classes):
-        super(UNet, self).__init__()
-        self.inc = inconv(n_channels, 64)
-        self.down1 = down(64, 128)
-        self.down2 = down(128, 256)
-        self.down3 = down(256, 512)
-        self.down4 = down(512, 512)
-        self.up1 = up(1024, 256)
-        self.up2 = up(512, 128)
-        self.up3 = up(256, 64)
-        self.up4 = up(128, 64)
-        self.outc = outconv(64, n_classes)
+    """The "U-Net" architecture for semantic segmentation, adapted by changing the encoder to a ResNet feature extractor.
+
+       Also known as AlbuNet due to its inventor Alexander Buslaev.
+    """
+
+    def __init__(self, num_classes, num_filters=32, pretrained=True):
+        """Creates an `UNet` instance for semantic segmentation.
+
+        Args:
+          num_classes: number of classes to predict.
+          pretrained: use ImageNet pre-trained backbone feature extractor
+        """
+
+        super().__init__()
+
+        # Todo: make input channels configurable, not hard-coded to three channels for RGB
+
+        self.resnet = resnet50(pretrained=pretrained)
+
+        # Access resnet directly in forward pass; do not store refs here due to
+        # https://github.com/pytorch/pytorch/issues/8392
+
+        self.center = DecoderBlock(2048, num_filters * 8)
+
+        self.dec0 = DecoderBlock(2048 + num_filters * 8, num_filters * 8)
+        self.dec1 = DecoderBlock(1024 + num_filters * 8, num_filters * 8)
+        self.dec2 = DecoderBlock(512 + num_filters * 8, num_filters * 2)
+        self.dec3 = DecoderBlock(256 + num_filters * 2, num_filters * 2 * 2)
+        self.dec4 = DecoderBlock(num_filters * 2 * 2, num_filters)
+        self.dec5 = ConvRelu(num_filters, num_filters)
+
+        self.final = nn.Conv2d(num_filters, num_classes, kernel_size=1)
 
     def forward(self, x):
-        x1 = self.inc(x)
-        x2 = self.down1(x1)
-        x3 = self.down2(x2)
-        x4 = self.down3(x3)
-        x5 = self.down4(x4)
-        x = self.up1(x5, x4)
-        x = self.up2(x, x3)
-        x = self.up3(x, x2)
-        x = self.up4(x, x1)
-        x = self.outc(x)
-        return F.sigmoid(x)
+        """The networks forward pass for which autograd synthesizes the backwards pass.
+
+        Args:
+          x: the input tensor
+
+        Returns:
+          The networks output tensor.
+        """
+        size = x.size()
+        assert size[-1] % 32 == 0 and size[-2] % 32 == 0, "image resolution has to be divisible by 32 for resnet"
+
+        enc0 = self.resnet.conv1(x)
+        enc0 = self.resnet.bn1(enc0)
+        enc0 = self.resnet.relu(enc0)
+        enc0 = self.resnet.maxpool(enc0)
+
+        enc1 = self.resnet.layer1(enc0)
+        enc2 = self.resnet.layer2(enc1)
+        enc3 = self.resnet.layer3(enc2)
+        enc4 = self.resnet.layer4(enc3)
+
+        center = self.center(nn.functional.max_pool2d(enc4, kernel_size=2, stride=2))
+
+        dec0 = self.dec0(torch.cat([enc4, center], dim=1))
+        dec1 = self.dec1(torch.cat([enc3, dec0], dim=1))
+        dec2 = self.dec2(torch.cat([enc2, dec1], dim=1))
+        dec3 = self.dec3(torch.cat([enc1, dec2], dim=1))
+        dec4 = self.dec4(dec3)
+        dec5 = self.dec5(dec4)
+
+        return self.final(dec5)

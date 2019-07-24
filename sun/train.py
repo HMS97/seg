@@ -24,21 +24,20 @@ from utils.transforms import (
     ImageToTensor,
     MaskToTensor,
 )
-from torchcontrib.optim import SWA
-import torchcontrib
+
 from torchvision.transforms import Resize, CenterCrop, Normalize
 from utils.metrics import Metrics
 from models.segnet.segnet import segnet
-from models.unet.Unet import UNet
+from models.unet.unet import UNet
 import datetime
 import random
 import os
 import tqdm
 import json
 import argparse
-
+import logsetting
 device = 'cuda'
-path = './dataset'
+path = './alldataset'
 
 
 def get_dataset_loaders( workers,    batch_size = 4  ):
@@ -160,13 +159,15 @@ def validate(loader, num_classes, device, net, criterion):
 if __name__ == '__main__':
 
     parser = argparse.ArgumentParser()
-    parser.add_argument('--n_epoch', nargs='?', type=int, default=50, 
+    parser.add_argument('--n_epoch', nargs='?', type=int, default=50,
                     help='# of the epochs')
-    parser.add_argument('--batch_size', nargs='?', type=int, default=16, 
+    parser.add_argument('--batch_size', nargs='?', type=int, default=4,
                     help='Batch Size')
+    parser.add_argument('--swa_start', nargs='?', type=int, default=1)
     parser.add_argument('--l_rate', nargs='?', type=float, default=5e-3, 
                     help='Learning Rate')
     parser.add_argument('--model',nargs='?',type=str,default='unet')
+    parser.add_argument('--swa',nargs='?',type=bool,default=True)
 
     arg = parser.parse_args()
 
@@ -183,36 +184,45 @@ if __name__ == '__main__':
 
     history = collections.defaultdict(list)
     model_dict = {
-                'unet':UNet( num_classes = num_classes ).train().to(device),
+                'unet':UNet( num_classes = num_classes).train().to(device),
                 'segnet':segnet(  n_classes = num_classes ).train().to(device),
                 'pspnet':smp.PSPNet(classes= num_classes ).train().to(device),
                 }
 
     net = model_dict[model_name]
-
     if torch.cuda.device_count() > 1:
         print("using multi gpu")
         net = torch.nn.DataParallel(net,device_ids = [0, 1, 2, 3])
-        
+    else:
+        print('using one gpu')
+
+    # if True:
+    #     print("The ckp has been loaded sucessfully ")
+    #     net = torch.load("./model/unet_2019-07-23.pth") # load the pretrained model
     criterion = FocalLoss2d().to(device)
-    base_opt = torch.optim.SGD(net.parameters(), lr=learning_rate)
-    opt = torchcontrib.optim.SWA(base_opt, swa_start=10, swa_freq=5, swa_lr=0.05)
-    train_loader, val_loader = get_dataset_loaders(5,batch_size)
+    train_loader, val_loader = get_dataset_loaders(5, batch_size)
+    opt = torch.optim.SGD(net.parameters(), lr=learning_rate)
+    today=str(datetime.date.today())
+    logger = setting.get_log(model_name + today +'_log.txt')
+    scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(opt, T_max=5,eta_min=4e-08)
+
+
 
     for epoch in range(num_epochs):
-        print("Epoch: {}/{}".format(epoch + 1, num_epochs))
-
+        logger.info("Epoch: {}/{}".format(epoch + 1, num_epochs))
+        scheduler.step()
         train_hist = train(train_loader, num_classes, device, net, opt, criterion)
-        print( 'loss',train_hist["loss"],
+        logger.info( 'loss',train_hist["loss"],
                 'miou',train_hist["miou"],
                 'fg_iou',train_hist["fg_iou"],
                 'mcc',train_hist["mcc"] )
 
+ 
         for k, v in train_hist.items():
             history["train " + k].append(v)
 
         val_hist = validate(val_loader, num_classes, device, net, criterion)
-        print('loss',val_hist["loss"],
+        logger.info('loss',val_hist["loss"],
                 'miou',val_hist["miou"],
                 'fg_iou',val_hist["fg_iou"],
                 'mcc',val_hist["mcc"])
@@ -220,12 +230,10 @@ if __name__ == '__main__':
         for k, v in val_hist.items():
             history["val " + k].append(v)
 
-        today=str(datetime.date.today())
 
-        checkpoint = f'model/{model_item}_{today}.pth'
+        checkpoint = 'model/{}_{}.pth'.format(model_name,today)
         torch.save(net,checkpoint)
-    opt.swap_swa_sgd()
-    json = json.dumps(history)
-    f = open(f"model/{model_item}_{today}.json","w")
-    f.write(json)
-    f.close()
+    # json = json.dumps(history)
+    # f = open("model/{}_{}.json".format(model_name,today),"w")
+    # f.write(json)
+    # f.close()
