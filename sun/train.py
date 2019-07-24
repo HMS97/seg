@@ -35,7 +35,7 @@ import os
 import tqdm
 import json
 import argparse
-import logsetting
+from logsetting import  get_log
 device = 'cuda'
 path = './alldataset'
 
@@ -203,7 +203,7 @@ if __name__ == '__main__':
     train_loader, val_loader = get_dataset_loaders(5, batch_size)
     opt = torch.optim.SGD(net.parameters(), lr=learning_rate)
     today=str(datetime.date.today())
-    logger = setting.get_log(model_name + today +'_log.txt')
+    logger = get_log(model_name + today +'_log.txt')
     scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(opt, T_max=5,eta_min=4e-08)
 
 
