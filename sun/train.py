@@ -203,7 +203,7 @@ if __name__ == '__main__':
     train_loader, val_loader = get_dataset_loaders(5, batch_size)
     opt = torch.optim.SGD(net.parameters(), lr=learning_rate)
     today=str(datetime.date.today())
-    logger = get_log(model_name + today +'_log.txt')
+    # logger = get_log(model_name + today +'_log.txt')
     scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(opt, T_max=5,eta_min=4e-08)
 
 
@@ -212,7 +212,7 @@ if __name__ == '__main__':
         logger.info("Epoch: {}/{}".format(epoch + 1, num_epochs))
         scheduler.step()
         train_hist = train(train_loader, num_classes, device, net, opt, criterion)
-        logger.info( 'loss',train_hist["loss"],
+        print( 'loss',train_hist["loss"],
                 'miou',train_hist["miou"],
                 'fg_iou',train_hist["fg_iou"],
                 'mcc',train_hist["mcc"] )
@@ -222,7 +222,7 @@ if __name__ == '__main__':
             history["train " + k].append(v)
 
         val_hist = validate(val_loader, num_classes, device, net, criterion)
-        logger.info('loss',val_hist["loss"],
+        print('loss',val_hist["loss"],
                 'miou',val_hist["miou"],
                 'fg_iou',val_hist["fg_iou"],
                 'mcc',val_hist["mcc"])
@@ -233,7 +233,7 @@ if __name__ == '__main__':
 
         checkpoint = 'model/{}_{}.pth'.format(model_name,today)
         torch.save(net,checkpoint)
-    # json = json.dumps(history)
-    # f = open("model/{}_{}.json".format(model_name,today),"w")
-    # f.write(json)
-    # f.close()
+    json = json.dumps(history)
+    f = open("model/{}_{}.json".format(model_name,today),"w")
+    f.write(json)
+    f.close()
